@@ -9,28 +9,26 @@ if (!MONGODB_URI) {
 
 const client = new MongoClient(MONGODB_URI);
 
+const db = client.db();
+
 let isConnected = false;
 
 const connectDB = async () => {
   try {
-    if (isConnected) {
-      console.log("MongoDB already connected");
-      return client;
-    }
+    if (isConnected) return db;
 
     await client.connect();
-
-    await client.db().command({ ping: 1 });
+    await db.command({ ping: 1 });
 
     isConnected = true;
 
     console.log("MongoDB connected successfully");
 
-    return client;
+    return db;
   } catch (error) {
     console.error("MongoDB connection failed:", error);
     throw error;
   }
 };
 
-export { client, connectDB };
+export { client, db, connectDB };
