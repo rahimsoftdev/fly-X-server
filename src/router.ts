@@ -1,18 +1,21 @@
 import { Router } from "express";
 
 import healthRouter from "./modules/health/health.router.js";
-// import customTravelRequestRouter from "./modules/custom-travel-request/custom-travel-request.route.js";
-// import travelPreferenceRouter from "./modules/travel-preference/travel-preference.route.js";
 import opportunityRouter from "./modules/opportunity/opportunity.route.js";
+import travelRouter from "./modules/travel-preference/trevel.router.js";
+import customTravelRouter from "./modules/custom-travel-request/custom-travel-request.route.js";
 
 const router = Router();
+
 
 // Health Route
 router.use("/health", healthRouter);
 
-// Module Routes
-// router.use("/custom-travel-requests", customTravelRequestRouter);
-// router.use("/travel-preferences", travelPreferenceRouter);
+// opportunities base router:
 router.use("/opportunities", opportunityRouter);
+
+// travel base router:
+router.use("/travel", travelRouter);
+router.use("/custom-travel", customTravelRouter);
 
 export default router;

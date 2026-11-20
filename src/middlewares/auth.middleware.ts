@@ -36,6 +36,7 @@ export const requireAuth = async (
       id: String(payload.id ?? payload.sub),
       email: String(payload.email ?? ""),
       name: String(payload.name ?? ""),
+      role: String(payload.role ?? "user").toLowerCase(),
     };
 
     next();
