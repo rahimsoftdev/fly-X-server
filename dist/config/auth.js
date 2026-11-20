@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
+import { jwt } from "better-auth/plugins";
 import { db } from "./db.js";
 export const auth = betterAuth({
     database: mongodbAdapter(db),
@@ -48,5 +49,8 @@ export const auth = betterAuth({
             },
         },
     },
+    plugins: [
+        jwt(),
+    ],
 });
 //# sourceMappingURL=auth.js.map

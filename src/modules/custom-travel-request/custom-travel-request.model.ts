@@ -1,9 +1,11 @@
-
+import type { HydratedDocument } from "mongoose";
 import { model, Schema } from "mongoose";
 import type {
     ICustomTravelRequest,
     IPassengerInformation,
 } from "./custom-travel-request.types.js";
+type CustomTravelRequestDocument =
+  HydratedDocument<ICustomTravelRequest>;
 
 const passengerSchema = new Schema<IPassengerInformation>(
     {
@@ -64,19 +66,19 @@ const customTravelRequestSchema =
 
             returnOrigin: {
                 type: String,
-                required: function () {
+                required: function (this: CustomTravelRequestDocument) {
                     return this.type === "two-way";
                 },
             },
             returnDestination: {
                 type: String,
-                required: function () {
+                required: function (this: CustomTravelRequestDocument) {
                     return this.type === "two-way";
                 },
             },
             returnDate: {
                 type: Date,
-                required: function () {
+                required: function (this: CustomTravelRequestDocument) {
                     return this.type === "two-way";
                 },
             },
