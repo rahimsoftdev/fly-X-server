@@ -6,10 +6,10 @@ export type OpportunityStatus = IOpportunity["status"];
 export type OpportunityType = IOpportunity["type"];
 
 export const OPPORTUNITY_STATUSES: OpportunityStatus[] = [
-    "draft",
-    "open",
-    "confirmed",
-    "completed",
+  "draft",
+  "open",
+  "confirmed",
+  "completed",
 ];
 
 export const OPPORTUNITY_TYPES: OpportunityType[] = ["one-way", "two-way"];
@@ -22,40 +22,40 @@ export interface GetOpportunitiesParams {
 }
 
 export const getOpportunitiesService = async ({
-    page,
-    limit,
-    status,
-    type,
+  page,
+  limit,
+  status,
+  type,
 }: GetOpportunitiesParams) => {
-    const filter: { status?: OpportunityStatus; type?: OpportunityType } = {};
+  const filter: { status?: OpportunityStatus; type?: OpportunityType } = {};
 
-    if (status) filter.status = status;
-    if (type) filter.type = type;
+  if (status) filter.status = status;
+  if (type) filter.type = type;
 
-    const skip = (page - 1) * limit;
+  const skip = (page - 1) * limit;
 
-    const [opportunities, total] = await Promise.all([
-        Opportunity.find(filter)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .lean(),
-        Opportunity.countDocuments(filter),
-    ]);
+  const [opportunities, total] = await Promise.all([
+    Opportunity.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Opportunity.countDocuments(filter),
+  ]);
 
-    const totalPages = Math.ceil(total / limit);
+  const totalPages = Math.ceil(total / limit);
 
-    return {
-        opportunities,
-        meta: {
-            page,
-            limit,
-            total,
-            totalPages,
-            hasNextPage: page < totalPages,
-            hasPrevPage: page > 1,
-        },
-    };
+  return {
+    opportunities,
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    },
+  };
 };
 
 export class OpportunityError extends Error {
@@ -103,13 +103,44 @@ export const reserveOpportunityService = async (
   }
   throw new OpportunityError("No seats available", 409);
 };
+export const cancelReservationService = async (
+  opportunityId: string,
+  userId: string
+) => {
+  if (!isValidObjectId(opportunityId)) {
+    throw new OpportunityError("Invalid opportunity id", 400);
+  }
+
+  // শর্ত আর সরানো একসাথে (atomic): open + user আছে
+  const updated = await Opportunity.findOneAndUpdate(
+    { _id: opportunityId, status: "open", passengers: userId },
+    { $pull: { passengers: userId } },
+    { new: true }
+  ).lean();
+
+  if (updated) return updated;
+
+  const opportunity = await Opportunity.findById(opportunityId).lean();
+  if (!opportunity) throw new OpportunityError("Opportunity not found", 404);
+  if (!opportunity.passengers.includes(userId)) {
+    throw new OpportunityError("You have not reserved this opportunity", 404);
+  }
+  throw new OpportunityError(
+    "Once confirmed, cancellation is not available",
+    400
+  );
+};
 
 export const getMyOpportunitiesService = async (
   userId: string,
   page: number,
-  limit: number
+  limit: number,
+  status?: OpportunityStatus | undefined
 ) => {
-  const filter = { passengers: userId };
+  const filter: { passengers: string; status?: OpportunityStatus } = {
+    passengers: userId,
+  };
+  if (status) filter.status = status;
   const skip = (page - 1) * limit;
 
   const [opportunities, total] = await Promise.all([
