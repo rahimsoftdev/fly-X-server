@@ -1,8 +1,11 @@
 import type { Request, Response } from "express";
 import {
+    getMyOpportunitiesService,
     getOpportunitiesService,
     OPPORTUNITY_STATUSES,
     OPPORTUNITY_TYPES,
+    OpportunityError,
+    reserveOpportunityService,
     type OpportunityStatus,
     type OpportunityType,
 } from "./opportunity.service.js";
@@ -65,4 +68,56 @@ export const getOpportunities = async (req: Request, res: Response) => {
             message: "Failed to fetch opportunities",
         });
     }
+};
+
+
+export const reserveOpportunity = async (req: Request, res: Response) => {
+  try {
+    const userId: string = res.locals.user.id; // সেশন থেকে, ফ্রন্টএন্ড থেকে না
+    const id = String(req.params.id);
+
+    const opportunity = await reserveOpportunityService(id, userId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Reservation placed successfully",
+      data: opportunity,
+    });
+  } catch (error) {
+    if (error instanceof OpportunityError) {
+      return res
+        .status(error.status)
+        .json({ success: false, message: error.message });
+    }
+    console.error("reserveOpportunity error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to place reservation",
+    });
+  }
+};
+
+export const getMyOpportunities = async (req: Request, res: Response) => {
+  try {
+    const userId: string = res.locals.user.id;
+    const page = toPositiveInt(req.query.page, DEFAULT_PAGE);
+    const limit = Math.min(
+      toPositiveInt(req.query.limit, DEFAULT_LIMIT),
+      MAX_LIMIT
+    );
+
+    const result = await getMyOpportunitiesService(userId, page, limit);
+
+    return res.status(200).json({
+      success: true,
+      data: result.opportunities,
+      meta: result.meta,
+    });
+  } catch (error) {
+    console.error("getMyOpportunities error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch your opportunities",
+    });
+  }
 };
