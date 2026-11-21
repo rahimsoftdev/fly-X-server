@@ -121,3 +121,5 @@ const CustomTravelRequest = model<ICustomTravelRequest>(
 );
 
 export default CustomTravelRequest;
+
+customTravelRequestSchema.index({ status: 1, preferredDeparture: 1 });

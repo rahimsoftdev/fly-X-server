@@ -4,9 +4,11 @@ import {
     createCustomTravel,
     deleteCustomTravel,
     getAllCustomTravels,
+    getCustomTravelById,
+    getCustomTravelDirections,
     getMyCustomTravels,
     updateCustomTravelStatus,
-    type Actor,
+    // type Actor,
 } from "./custom-travel-request.service.js";
 
 // requireAuth-er boshano user theke id + role
@@ -67,6 +69,33 @@ export const getAllCustomTravelsController = async (
     }
 };
 
+export const getCustomTravelByIdController = async (
+    req: Request,
+    res: Response
+) => {
+    try {
+        const data = await getCustomTravelById(
+            getActor(res),
+            String(req.params.id)
+        );
+        return res.json({ success: true, data });
+    } catch (error) {
+        return handleError(error, res);
+    }
+};
+
+export const getCustomTravelDirectionsController = async (
+    _req: Request,
+    res: Response
+) => {
+    try {
+        const data = await getCustomTravelDirections(getActor(res));
+        return res.json({ success: true, data });
+    } catch (error) {
+        return handleError(error, res);
+    }
+};
+
 export const deleteCustomTravelController = async (
     req: Request,
     res: Response
@@ -96,4 +125,34 @@ export const updateCustomTravelStatusController = async (
     } catch (error) {
         return handleError(error, res);
     }
+};
+
+// import type { Request, Response } from "express";
+// import type { Request, Response } from "express";
+import {
+    getCalendarDayDetails,
+    getCalendarSummary,
+    type Actor,
+} from "./custom-travel-request.service.js";
+
+export const getCalendarSummaryController = async (
+    req: Request,
+    res: Response
+) => {
+    const actor = res.locals.user as Actor;
+    const data = await getCalendarSummary(actor, req.query);
+    res.status(200).json({ success: true, data });
+};
+
+export const getCalendarDayController = async (
+    req: Request,
+    res: Response
+) => {
+    const actor = res.locals.user as Actor;
+    const data = await getCalendarDayDetails(
+        actor,
+        req.params.date,
+        req.query.status
+    );
+    res.status(200).json({ success: true, data });
 };

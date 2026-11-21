@@ -1,6 +1,8 @@
 import { isValidObjectId } from "mongoose";
 import { ServiceError } from "../../utils/service-error.util.js";
+// import { attachMembers } from "../../utils/member-lookup.util.js";
 import CustomTravelRequest from "./custom-travel-request.model.js";
+import { attachMembers } from "../../utils/member-lookup.util.js";
 
 const TRIP_TYPES = ["one-way", "two-way"] as const;
 const STATUSES = ["interested", "confirmed"] as const;
@@ -219,12 +221,58 @@ export const getAllCustomTravels = async (
     ]);
 
     return {
-        items,
+        // prottek request-er sathe member (name + email) jure dilam
+        items: await attachMembers(items),
         meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
 };
 
-// 4) Delete: admin/staff je kono ta, user shudhu nijerta
+// Ekta request-er details (member + passenger shoho).
+// admin/staff je kono ta dekhte pare, user shudhu nijerta
+export const getCustomTravelById = async (actor: Actor, id: string) => {
+    if (!isValidObjectId(id)) {
+        throw new ServiceError(400, "Invalid id");
+    }
+
+    const travel = await CustomTravelRequest.findOne(
+        accessFilter(actor, id)
+    ).lean();
+
+    if (!travel) {
+        throw new ServiceError(404, "Custom travel request not found");
+    }
+
+    const [withMember] = await attachMembers([travel]);
+    return withMember;
+};
+
+// Filter dropdown-er jonno alada alada direction (shudhu admin/staff)
+export const getCustomTravelDirections = async (actor: Actor) => {
+    if (!isPrivileged(actor.role)) {
+        throw new ServiceError(403, "You don't have permission to do this");
+    }
+
+    // boro-choto hater lekha ek-i direction ek-i dhora hoy
+    return CustomTravelRequest.aggregate<{
+        origin: string;
+        destination: string;
+    }>([
+        {
+            $group: {
+                _id: {
+                    o: { $toLower: "$origin" },
+                    d: { $toLower: "$destination" },
+                },
+                origin: { $first: "$origin" },
+                destination: { $first: "$destination" },
+            },
+        },
+        { $sort: { origin: 1, destination: 1 } },
+        { $project: { _id: 0, origin: 1, destination: 1 } },
+    ]);
+};
+
+// Delete: admin/staff je kono ta, user shudhu nijerta
 export const deleteCustomTravel = async (actor: Actor, id: string) => {
     if (!isValidObjectId(id)) {
         throw new ServiceError(400, "Invalid id");
@@ -269,4 +317,164 @@ export const updateCustomTravelStatus = async (
     }
 
     return updated;
+};
+
+
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_CALENDAR_RANGE_DAYS = 62;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// "YYYY-MM-DD" -> UTC-র ওই দিনের শুরু (00:00)
+const parseDay = (value: unknown, field: string) => {
+    if (typeof value !== "string" || !DATE_REGEX.test(value)) {
+        throw new ServiceError(400, `${field} must be in YYYY-MM-DD format`);
+    }
+    const date = new Date(`${value}T00:00:00.000Z`);
+    // 2026-02-31 এর মতো ভুয়া তারিখ ধরার জন্য
+    if (
+        Number.isNaN(date.getTime()) ||
+        date.toISOString().slice(0, 10) !== value
+    ) {
+        throw new ServiceError(400, `A valid ${field} is required`);
+    }
+    return date;
+};
+
+const resolveStatus = (status: unknown) =>
+    (STATUSES as readonly string[]).includes(status as string)
+        ? (status as (typeof STATUSES)[number])
+        : "interested";
+
+// 6) Calendar-এর cell গুলোর summary (শুধু admin/staff)
+export const getCalendarSummary = async (
+    actor: Actor,
+    query: Record<string, unknown>
+) => {
+    if (!isPrivileged(actor.role)) {
+        throw new ServiceError(403, "You don't have permission to do this");
+    }
+
+    const start = parseDay(query.from, "from");
+    const lastDay = parseDay(query.to, "to");
+
+    if (lastDay < start) {
+        throw new ServiceError(400, "to can't be before from");
+    }
+
+    const days = (lastDay.getTime() - start.getTime()) / DAY_MS + 1;
+    if (days > MAX_CALENDAR_RANGE_DAYS) {
+        throw new ServiceError(
+            400,
+            `Date range can't be longer than ${MAX_CALENDAR_RANGE_DAYS} days`
+        );
+    }
+
+    // to-র দিনটাও ধরার জন্য পরের দিনের 00:00 পর্যন্ত (exclusive)
+    const endExclusive = new Date(lastDay.getTime() + DAY_MS);
+    const status = resolveStatus(query.status);
+
+    const items = await CustomTravelRequest.aggregate<{
+        date: string;
+        count: number;
+        directions: { origin: string; destination: string; count: number }[];
+    }>([
+        {
+            $match: {
+                status,
+                preferredDeparture: { $gte: start, $lt: endExclusive },
+            },
+        },
+        // দিন + direction ধরে group (বড়-ছোট হাতের লেখা এক ধরা হয়)
+        {
+            $group: {
+                _id: {
+                    day: {
+                        $dateToString: {
+                            format: "%Y-%m-%d",
+                            date: "$preferredDeparture",
+                            timezone: "UTC",
+                        },
+                    },
+                    o: { $toLower: "$origin" },
+                    d: { $toLower: "$destination" },
+                },
+                origin: { $first: "$origin" },
+                destination: { $first: "$destination" },
+                count: { $sum: 1 },
+            },
+        },
+        { $sort: { origin: 1, destination: 1 } },
+        // এবার শুধু দিন ধরে group, direction গুলো array হবে
+        {
+            $group: {
+                _id: "$_id.day",
+                count: { $sum: "$count" },
+                directions: {
+                    $push: {
+                        origin: "$origin",
+                        destination: "$destination",
+                        count: "$count",
+                    },
+                },
+            },
+        },
+        { $sort: { _id: 1 } },
+        { $project: { _id: 0, date: "$_id", count: 1, directions: 1 } },
+    ]);
+
+    return { items };
+};
+
+// 7) একটা নির্দিষ্ট দিনের interested list (শুধু admin/staff)
+export const getCalendarDayDetails = async (
+    actor: Actor,
+    date: unknown,
+    statusInput?: unknown
+) => {
+    if (!isPrivileged(actor.role)) {
+        throw new ServiceError(403, "You don't have permission to do this");
+    }
+
+    const start = parseDay(date, "date");
+    const end = new Date(start.getTime() + DAY_MS);
+    const status = resolveStatus(statusInput);
+
+    const travels = await CustomTravelRequest.find({
+        status,
+        preferredDeparture: { $gte: start, $lt: end },
+    })
+        .sort({ createdAt: -1 })
+        .lean();
+
+    // উপরের দুই box-এর জন্য direction অনুযায়ী count
+    const directionMap = new Map<
+        string,
+        { origin: string; destination: string; count: number }
+    >();
+    for (const t of travels) {
+        const key = `${t.origin.toLowerCase()}|${t.destination.toLowerCase()}`;
+        const existing = directionMap.get(key);
+        if (existing) {
+            existing.count += 1;
+        } else {
+            directionMap.set(key, {
+                origin: t.origin,
+                destination: t.destination,
+                count: 1,
+            });
+        }
+    }
+
+    const withMembers = await attachMembers(travels);
+
+    return {
+        date: start.toISOString().slice(0, 10),
+        total: travels.length,
+        directions: [...directionMap.values()],
+        // list-এ পুরো passengers পাঠাচ্ছি না, শুধু সংখ্যা
+        items: withMembers.map(({ passengers, ...rest }: any) => ({
+            ...rest,
+            passengerCount: passengers?.length ?? 0,
+        })),
+    };
 };
