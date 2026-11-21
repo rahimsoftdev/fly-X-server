@@ -1,12 +1,18 @@
 import type { Request, Response } from "express";
+import { ServiceError } from "../../utils/service-error.util.js";
 import {
   cancelReservationService,
+  createOpportunityService,
+  getManageOpportunitiesService,
+  getManageOpportunityByIdService,
   getMyOpportunitiesService,
   getOpportunitiesService,
   OPPORTUNITY_STATUSES,
   OPPORTUNITY_TYPES,
   OpportunityError,
   reserveOpportunityService,
+  updateOpportunityStatusService,
+  type ManageActor,
   type OpportunityStatus,
   type OpportunityType,
 } from "./opportunity.service.js";
@@ -70,7 +76,6 @@ export const getOpportunities = async (req: Request, res: Response) => {
     });
   }
 };
-
 
 export const reserveOpportunity = async (req: Request, res: Response) => {
   try {
@@ -164,5 +169,84 @@ export const cancelReservation = async (req: Request, res: Response) => {
       success: false,
       message: "Failed to cancel reservation",
     });
+  }
+};
+
+/* ============================================================
+   Staff / Admin: manage section
+============================================================ */
+
+const handleManageError = (res: Response, error: unknown, fallback: string) => {
+  if (error instanceof ServiceError) {
+    const code = (error as any).statusCode ?? (error as any).status ?? 400;
+    return res.status(code).json({ success: false, message: error.message });
+  }
+  if (error instanceof OpportunityError) {
+    return res
+      .status(error.status)
+      .json({ success: false, message: error.message });
+  }
+  console.error(fallback, error);
+  return res.status(500).json({ success: false, message: fallback });
+};
+
+export const createOpportunityController = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const actor = res.locals.user as ManageActor;
+    const data = await createOpportunityService(actor, req.body);
+    return res.status(201).json({ success: true, data });
+  } catch (error) {
+    return handleManageError(res, error, "Failed to create opportunity");
+  }
+};
+
+export const getManageOpportunitiesController = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const actor = res.locals.user as ManageActor;
+    const result = await getManageOpportunitiesService(actor, req.query);
+    return res
+      .status(200)
+      .json({ success: true, data: result.items, meta: result.meta });
+  } catch (error) {
+    return handleManageError(res, error, "Failed to fetch opportunities");
+  }
+};
+
+export const getManageOpportunityByIdController = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const actor = res.locals.user as ManageActor;
+    const data = await getManageOpportunityByIdService(
+      actor,
+      String(req.params.id)
+    );
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    return handleManageError(res, error, "Failed to fetch opportunity");
+  }
+};
+
+export const updateOpportunityStatusController = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const actor = res.locals.user as ManageActor;
+    const data = await updateOpportunityStatusService(
+      actor,
+      String(req.params.id),
+      req.body?.status
+    );
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    return handleManageError(res, error, "Failed to update status");
   }
 };

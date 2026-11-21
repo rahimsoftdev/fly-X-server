@@ -1,6 +1,8 @@
 import Opportunity from "./opportunity.model.js";
 import type { IOpportunity } from "./opportunity.types.js";
 import { isValidObjectId } from "mongoose";
+import { ServiceError } from "../../utils/service-error.util.js";
+import { attachMembers } from "../../utils/member-lookup.util.js";
 
 export type OpportunityStatus = IOpportunity["status"];
 export type OpportunityType = IOpportunity["type"];
@@ -103,6 +105,7 @@ export const reserveOpportunityService = async (
   }
   throw new OpportunityError("No seats available", 409);
 };
+
 export const cancelReservationService = async (
   opportunityId: string,
   userId: string
@@ -165,4 +168,309 @@ export const getMyOpportunitiesService = async (
       hasPrevPage: page > 1,
     },
   };
+};
+
+/* ============================================================
+   Staff / Admin: manage section
+============================================================ */
+
+const MANAGE_STATUSES = ["draft", "open", "confirmed", "completed"] as const;
+type ManageStatus = (typeof MANAGE_STATUSES)[number];
+
+// নতুন বানানোর সময় শুধু এই দুটো status চলবে
+const CREATE_STATUSES: ManageStatus[] = ["open", "draft"];
+
+// কোন status থেকে কোনটায় যাওয়া যাবে
+const STATUS_TRANSITIONS: Record<ManageStatus, ManageStatus[]> = {
+  draft: ["open"],
+  open: ["draft", "confirmed"],
+  confirmed: ["completed"],
+  completed: [],
+};
+
+const MANAGE_PRIVILEGED_ROLES = ["admin", "staff"];
+const MANAGE_DEFAULT_LIMIT = 10;
+const MANAGE_MAX_LIMIT = 100;
+
+export interface ManageActor {
+  id: string;
+  role: string;
+}
+
+const assertStaff = (actor: ManageActor) => {
+  if (!MANAGE_PRIVILEGED_ROLES.includes((actor.role ?? "").toLowerCase())) {
+    throw new ServiceError(403, "You don't have permission to do this");
+  }
+};
+
+const escapeRegexManage = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const requireManageText = (value: unknown, field: string) => {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new ServiceError(400, `${field} is required`);
+  }
+  return value.trim();
+};
+
+// passengers হলো user id-র array, তাই booked seat = তার দৈর্ঘ্য
+const getBookedSeats = (opp: any): number =>
+  Array.isArray(opp.passengers) ? opp.passengers.length : 0;
+
+const withSeatInfo = (opp: any) => {
+  const totalSeats = Number(opp.totalCapacity) || 0;
+  const bookedSeats = getBookedSeats(opp);
+  return {
+    ...opp,
+    totalSeats,
+    bookedSeats,
+    availableSeats: Math.max(totalSeats - bookedSeats, 0),
+  };
+};
+
+// 1) নতুন opportunity বানানো
+// 1) নতুন opportunity বানানো
+export const createOpportunityService = async (
+  actor: ManageActor,
+  body: any
+) => {
+  assertStaff(actor);
+
+  const {
+    type = "one-way",
+    origin,
+    destination,
+    preferredDeparture,
+    returnOrigin,
+    returnDestination,
+    returnDate,
+    price: rawPrice,
+    aircraftType,
+    totalCapacity,
+    bookingSpeed,
+    status,
+  } = body ?? {};
+
+  if (type !== "one-way" && type !== "two-way") {
+    throw new ServiceError(400, 'type must be "one-way" or "two-way"');
+  }
+
+  if (!CREATE_STATUSES.includes(status)) {
+    throw new ServiceError(
+      400,
+      `status must be one of: ${CREATE_STATUSES.join(", ")}`
+    );
+  }
+
+  const cleanOrigin = requireManageText(origin, "origin");
+  const cleanDestination = requireManageText(destination, "destination");
+  if (cleanOrigin.toLowerCase() === cleanDestination.toLowerCase()) {
+    throw new ServiceError(400, "origin and destination can't be the same");
+  }
+
+  const departure = new Date(preferredDeparture);
+  if (!preferredDeparture || Number.isNaN(departure.getTime())) {
+    throw new ServiceError(400, "A valid preferredDeparture is required");
+  }
+  // timezone-এর ঝামেলা এড়াতে আগের দিন পর্যন্ত গ্রহণ করা হয়
+  const earliestAllowed = new Date();
+  earliestAllowed.setUTCHours(0, 0, 0, 0);
+  earliestAllowed.setUTCDate(earliestAllowed.getUTCDate() - 1);
+  if (departure < earliestAllowed) {
+    throw new ServiceError(400, "preferredDeparture can't be in the past");
+  }
+
+  const price = Number(rawPrice);
+  if (!Number.isFinite(price) || price < 0) {
+    throw new ServiceError(400, "price must be a valid number");
+  }
+
+  const capacity = Number(totalCapacity);
+  if (!Number.isInteger(capacity) || capacity < 1) {
+    throw new ServiceError(
+      400,
+      "totalCapacity must be a whole number of at least 1"
+    );
+  }
+
+  // two-way হলে ফেরার তারিখ আর পথ
+  const returnFields: Record<string, unknown> = {};
+  if (type === "two-way") {
+    const ret = new Date(returnDate);
+    if (!returnDate || Number.isNaN(ret.getTime())) {
+      throw new ServiceError(400, "A valid returnDate is required");
+    }
+    if (ret < departure) {
+      throw new ServiceError(
+        400,
+        "returnDate can't be before preferredDeparture"
+      );
+    }
+    returnFields.returnDate = ret;
+    // না পাঠালে ফেরার পথ = আগের পথ উল্টো
+    returnFields.returnOrigin =
+      typeof returnOrigin === "string" && returnOrigin.trim()
+        ? returnOrigin.trim()
+        : cleanDestination;
+    returnFields.returnDestination =
+      typeof returnDestination === "string" && returnDestination.trim()
+        ? returnDestination.trim()
+        : cleanOrigin;
+  }
+
+  return Opportunity.create({
+    type,
+    origin: cleanOrigin,
+    destination: cleanDestination,
+    preferredDeparture: departure,
+    ...returnFields,
+    price,
+    aircraftType: requireManageText(aircraftType, "aircraftType"),
+    totalCapacity: capacity,
+    // UI form-এ নেই, তাই না পাঠালে default (আপনার প্রজেক্ট অনুযায়ী বদলান)
+    bookingSpeed:
+      typeof bookingSpeed === "string" && bookingSpeed.trim()
+        ? bookingSpeed.trim()
+        : "standard",
+    status,
+    creatorUserId: actor.id,
+  });
+};
+
+// 2) Staff-এর management table
+export const getManageOpportunitiesService = async (
+  actor: ManageActor,
+  query: Record<string, unknown>
+) => {
+  assertStaff(actor);
+
+  const page = Math.max(Number(query.page) || 1, 1);
+  const limit = Math.min(
+    Math.max(Number(query.limit) || MANAGE_DEFAULT_LIMIT, 1),
+    MANAGE_MAX_LIMIT
+  );
+
+  const filter: Record<string, unknown> = {};
+  const { status, origin, destination } = query;
+
+  if ((MANAGE_STATUSES as readonly string[]).includes(status as string)) {
+    filter.status = status;
+  }
+  if (typeof origin === "string" && origin.trim()) {
+    filter.origin = new RegExp(`^${escapeRegexManage(origin.trim())}$`, "i");
+  }
+  if (typeof destination === "string" && destination.trim()) {
+    filter.destination = new RegExp(
+      `^${escapeRegexManage(destination.trim())}$`,
+      "i"
+    );
+  }
+
+  const [items, total] = await Promise.all([
+    Opportunity.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    Opportunity.countDocuments(filter),
+  ]);
+
+  const totalPages = Math.ceil(total / limit);
+
+  return {
+    items: items.map((item) => withSeatInfo(item)),
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    },
+  };
+};
+
+// 3) Details page (traveler list সহ)
+export const getManageOpportunityByIdService = async (
+  actor: ManageActor,
+  id: string
+) => {
+  assertStaff(actor);
+
+  if (!isValidObjectId(id)) {
+    throw new ServiceError(400, "Invalid id");
+  }
+
+  const opportunity: any = await Opportunity.findById(id).lean();
+  if (!opportunity) {
+    throw new ServiceError(404, "Opportunity not found");
+  }
+
+  const passengerIds: string[] = Array.isArray(opportunity.passengers)
+    ? opportunity.passengers.map(String)
+    : [];
+
+  // attachMembers creatorUserId দিয়ে member খোঁজে, তাই সেই নামে দিলাম
+  const travelers = (
+    await attachMembers(passengerIds.map((pid) => ({ creatorUserId: pid })))
+  ).map((t: any) => ({
+    userId: t.creatorUserId,
+    member: t.member,
+  }));
+
+  return {
+    ...withSeatInfo(opportunity),
+    travelers,
+  };
+};
+
+// 4) শুধু status বদল
+export const updateOpportunityStatusService = async (
+  actor: ManageActor,
+  id: string,
+  status: unknown
+) => {
+  assertStaff(actor);
+
+  if (!isValidObjectId(id)) {
+    throw new ServiceError(400, "Invalid id");
+  }
+
+  if (!(MANAGE_STATUSES as readonly string[]).includes(status as string)) {
+    throw new ServiceError(
+      400,
+      `status must be one of: ${MANAGE_STATUSES.join(", ")}`
+    );
+  }
+  const nextStatus = status as ManageStatus;
+
+  const opportunity: any = await Opportunity.findById(id);
+  if (!opportunity) {
+    throw new ServiceError(404, "Opportunity not found");
+  }
+
+  const currentStatus = opportunity.status as ManageStatus;
+  if (currentStatus === nextStatus) {
+    throw new ServiceError(400, `Opportunity is already ${nextStatus}`);
+  }
+
+  if (!STATUS_TRANSITIONS[currentStatus]?.includes(nextStatus)) {
+    throw new ServiceError(
+      400,
+      `Can't change status from ${currentStatus} to ${nextStatus}`
+    );
+  }
+
+  // কেউ book করে ফেললে draft-এ ফেরানো যাবে না
+  if (nextStatus === "draft" && getBookedSeats(opportunity) > 0) {
+    throw new ServiceError(
+      400,
+      "Can't move to draft because seats are already booked"
+    );
+  }
+
+  opportunity.status = nextStatus;
+  await opportunity.save();
+
+  return opportunity;
 };

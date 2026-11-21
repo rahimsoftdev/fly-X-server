@@ -92,10 +92,11 @@ const opportunitySchema = new Schema<IOpportunity>(
     timestamps: true,
   }
 );
+opportunitySchema.index({ passengers: 1 });
+
 
 const Opportunity = model<IOpportunity>(
   "Opportunity",
   opportunitySchema
 );
-opportunitySchema.index({ passengers: 1 });
 export default Opportunity;
