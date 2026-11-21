@@ -5,6 +5,14 @@ import {
     getAllTravels,
     getMyTravels,
     ServiceError,
+    updateManageTravelStatus,
+} from "./travel.service.js";
+
+import {
+    getManageTravelById,
+    getManageTravelDirections,
+    getManageTravels,
+    type TravelActor,
 } from "./travel.service.js";
 
 // Sob controller-er common error handler
@@ -57,6 +65,65 @@ export const getAllTravelsController = async (req: Request, res: Response) => {
             req.query as Record<string, unknown>
         );
         return res.json({ success: true, data: items, meta });
+    } catch (error) {
+        return handleError(error, res);
+    }
+};
+
+export const getManageTravelsController = async (
+    req: Request,
+    res: Response
+) => {
+    try {
+        const actor = res.locals.user as TravelActor;
+        const { items, meta } = await getManageTravels(
+            actor,
+            req.query as Record<string, unknown>
+        );
+        return res.json({ success: true, data: items, meta });
+    } catch (error) {
+        return handleError(error, res);
+    }
+};
+
+export const getManageTravelByIdController = async (
+    req: Request,
+    res: Response
+) => {
+    try {
+        const actor = res.locals.user as TravelActor;
+        const data = await getManageTravelById(actor, String(req.params.id));
+        return res.json({ success: true, data });
+    } catch (error) {
+        return handleError(error, res);
+    }
+};
+
+export const getManageTravelDirectionsController = async (
+    req: Request,
+    res: Response
+) => {
+    try {
+        const actor = res.locals.user as TravelActor;
+        const data = await getManageTravelDirections(actor, req.query.type);
+        return res.json({ success: true, data });
+    } catch (error) {
+        return handleError(error, res);
+    }
+};
+
+export const updateManageTravelStatusController = async (
+    req: Request,
+    res: Response
+): Promise<Response> => {
+    try {
+        const actor = res.locals.user as TravelActor;
+        const data = await updateManageTravelStatus(
+            actor,
+            String(req.params.id),
+            req.body?.status
+        );
+        return res.json({ success: true, data });
     } catch (error) {
         return handleError(error, res);
     }
