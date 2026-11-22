@@ -5,6 +5,7 @@ import opportunityRouter from "./modules/opportunity/opportunity.route.js";
 import travelRouter from "./modules/travel-preference/trevel.router.js";
 import customTravelRouter from "./modules/custom-travel-request/custom-travel-request.route.js";
 import analyticsRouter from "./modules/analytics/analytics.route.js";
+import dashboardRouter from "./modules/dashboard/dashboard.route.js";
 
 const router = Router();
 
@@ -19,5 +20,6 @@ router.use("/opportunities", opportunityRouter);
 router.use("/travel", travelRouter);
 router.use("/custom-travel", customTravelRouter);
 router.use("/analytics", analyticsRouter);
+router.use("/dashboard", dashboardRouter);
 
 export default router;
