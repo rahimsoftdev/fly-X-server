@@ -89,3 +89,10 @@ export interface IStaffListResponse {
   items: IStaffListItem[];
   meta: IUserListResponse["meta"];
 }
+
+export interface ICreateStaffInput {
+  name: string;
+  email: string;
+  phone: string;
+  password: string;
+}

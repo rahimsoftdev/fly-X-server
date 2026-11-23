@@ -3,6 +3,8 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "./config/auth.js";
 import cors from 'cors'
 import router from "./router.js";
+import { connectDB } from "./config/db.js";
+import connectMongoose from "./config/mongoose.js";
 
 const app = express();
 app.use(
@@ -13,6 +15,16 @@ app.use(
         allowedHeaders: ["Content-Type", "Authorization"],
     })
 );
+
+app.use(async (_req, _res, next) => {
+    try {
+        await connectDB();
+        await connectMongoose();
+        next();
+    } catch (error) {
+        next(error);
+    }
+});
 
 app.all("/api/auth/{*any}", toNodeHandler(auth));
 

@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
-import { ApiError, deleteStaffById, getAllStaff, getAllUsers, getTotalUserCount, updateUserById } from "./user.service.js";
-import type { IUpdateUserInput } from "./user.types.js";
+import { ApiError, createStaff, deleteStaffById, getAllStaff, getAllUsers, getTotalUserCount, updateUserById } from "./user.service.js";
+import type { ICreateStaffInput, IUpdateUserInput } from "./user.types.js";
 
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
@@ -156,6 +156,79 @@ export const removeStaff = async (
     res.status(200).json({
       success: true,
       message: "Staff deleted successfully",
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      return res
+        .status(error.statusCode)
+        .json({ success: false, message: error.message });
+    }
+    next(error);
+  }
+};
+
+
+
+
+
+
+
+
+/* ---------- Create staff (admin) ---------- */
+const MIN_PASSWORD = 6;
+const MAX_PASSWORD = 128;
+
+const requireText = (value: unknown, label: string): string => {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new ApiError(400, `${label} is required`);
+  }
+  return value.trim();
+};
+
+const parseCreateStaffBody = (body: unknown): ICreateStaffInput => {
+  if (typeof body !== "object" || body === null) {
+    throw new ApiError(400, "Invalid request body");
+  }
+
+  const source = body as Record<string, unknown>;
+
+  const name = requireText(source.name, "Name");
+  const email = requireText(source.email, "Email").toLowerCase();
+  const phone = requireText(source.phone, "Telephone");
+
+  if (!EMAIL_REGEX.test(email)) {
+    throw new ApiError(400, "Please enter a valid email");
+  }
+
+  // পাসওয়ার্ড trim করা হয় না, যেমন দেওয়া হয়েছে তেমনই থাকবে
+  const password = source.password;
+  if (typeof password !== "string" || password.length < MIN_PASSWORD) {
+    throw new ApiError(
+      400,
+      `Password must be at least ${MIN_PASSWORD} characters`
+    );
+  }
+  if (password.length > MAX_PASSWORD) {
+    throw new ApiError(400, "Password is too long");
+  }
+
+  return { name, email, phone, password };
+};
+
+// POST /api/users/staff  (admin only)
+export const addStaff = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const input = parseCreateStaffBody(req.body);
+    const data = await createStaff(input);
+
+    res.status(201).json({
+      success: true,
+      message: "Staff account created successfully",
+      data,
     });
   } catch (error) {
     if (error instanceof ApiError) {

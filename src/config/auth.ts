@@ -13,6 +13,14 @@ export const auth = betterAuth({
     secret: process.env.BETTER_AUTH_SECRET,
     trustedOrigins: [process.env.CLIENT_URL!],
 
+    advanced: {
+        defaultCookieAttributes: {
+            sameSite: "none",
+            secure: true,
+            httpOnly: true,
+        },
+    },
+
     emailAndPassword: {
         enabled: true,
         minPasswordLength: 6,

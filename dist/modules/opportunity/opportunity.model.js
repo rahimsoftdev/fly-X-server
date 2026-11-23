@@ -73,6 +73,7 @@ const opportunitySchema = new Schema({
 }, {
     timestamps: true,
 });
+opportunitySchema.index({ passengers: 1 });
 const Opportunity = model("Opportunity", opportunitySchema);
 export default Opportunity;
 //# sourceMappingURL=opportunity.model.js.map

@@ -93,4 +93,5 @@ const customTravelRequestSchema = new Schema({
 });
 const CustomTravelRequest = model("CustomTravelRequest", customTravelRequestSchema);
 export default CustomTravelRequest;
+customTravelRequestSchema.index({ status: 1, preferredDeparture: 1 });
 //# sourceMappingURL=custom-travel-request.model.js.map

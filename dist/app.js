@@ -1,8 +1,10 @@
 import express from "express";
-import healthRouter from "./modules/health/health.router.js";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./config/auth.js";
 import cors from 'cors';
+import router from "./router.js";
+import { connectDB } from "./config/db.js";
+import connectMongoose from "./config/mongoose.js";
 const app = express();
 app.use(cors({
     origin: process.env.CLIENT_URL,
@@ -10,10 +12,20 @@ app.use(cors({
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
 }));
+app.use(async (_req, _res, next) => {
+    try {
+        await connectDB();
+        await connectMongoose();
+        next();
+    }
+    catch (error) {
+        next(error);
+    }
+});
 app.all("/api/auth/{*any}", toNodeHandler(auth));
 // Middleware
 app.use(express.json());
-// Routes
-app.use("/api/health", healthRouter);
+// Central API Router
+app.use("/api", router);
 export default app;
 //# sourceMappingURL=app.js.map

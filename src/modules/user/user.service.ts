@@ -1,12 +1,15 @@
 // import { isValidObjectId, Types } from "mongoose";
+import { auth } from "../../config/auth.js";
 import User from "./user.model.js";
-import type { IStaffListResponse, IUpdatedUser, IUpdateUserInput, IUserListResponse } from "./user.types.js";
+import type { ICreateStaffInput, IStaffListItem, IStaffListResponse, IUpdatedUser, IUpdateUserInput, IUserListResponse } from "./user.types.js";
 import { isValidObjectId, model, Schema, Types } from "mongoose";
 // import type { IStaffListResponse } from "./user.types.js";
 
 interface UserRow {
   _id: unknown;
   name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
   address: string;
@@ -22,8 +25,8 @@ export const getAllUsers = async (
   const skip = (page - 1) * limit;
 
   const [rows, total] = await Promise.all([
-    User.find({role:'user'})
-      .select("name email phone address city state zipCode")
+    User.find({ role: 'user' })
+      .select("name firstName lastName email phone address city state zipCode")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -37,6 +40,8 @@ export const getAllUsers = async (
     items: rows.map((r) => ({
       id: String(r._id),
       name: r.name,
+      firstName: r.firstName,
+      lastName: r.lastName,
       phone: r.phone,
       email: r.email,
       address: r.address,
@@ -241,4 +246,94 @@ export const deleteStaffById = async (id: string): Promise<void> => {
     AuthAccount.deleteMany({ userId: { $in: ids } }),
   ]);
   await User.deleteOne({ _id: id });
+};
+
+
+
+
+
+
+
+
+
+/* ---------- Create staff (admin) ---------- */
+const PLACEHOLDER = "N/A";
+
+// "Jane Cooper Smith" -> first: Jane, last: Cooper Smith
+const splitName = (name: string) => {
+  const [first = "", ...rest] = name.trim().split(/\s+/);
+  return { firstName: first, lastName: rest.join(" ") || PLACEHOLDER };
+};
+
+// Better Auth-এর error থেকে status ও বার্তা বের করা
+const toApiError = (err: unknown): ApiError => {
+  if (typeof err === "object" && err !== null) {
+    const e = err as { statusCode?: unknown; message?: unknown };
+    if (typeof e.statusCode === "number") {
+      return new ApiError(
+        e.statusCode,
+        typeof e.message === "string" ? e.message : "Failed to create staff"
+      );
+    }
+  }
+  return new ApiError(500, "Failed to create staff");
+};
+
+export const createStaff = async (
+  input: ICreateStaffInput
+): Promise<IStaffListItem> => {
+  const email = input.email.trim().toLowerCase();
+
+  // আগে থেকেই এই email থাকলে সরাসরি 409
+  const taken = await User.exists({ email });
+  if (taken) {
+    throw new ApiError(409, "This email is already in use");
+  }
+
+  const { firstName, lastName } = splitName(input.name);
+
+  // Better Auth নিজে পাসওয়ার্ড hash করে user + account বানাবে
+  try {
+    await auth.api.signUpEmail({
+      body: {
+        name: input.name.trim(),
+        email,
+        password: input.password,
+        firstName,
+        lastName,
+        phone: input.phone.trim(),
+        address: PLACEHOLDER,
+        zipCode: PLACEHOLDER,
+        city: PLACEHOLDER,
+        state: PLACEHOLDER,
+      },
+    });
+  } catch (err) {
+    throw toApiError(err);
+  }
+
+  // signUp-এ role পাঠানো যায় না (input: false), তাই এখানে বসাই
+  const result = await User.updateOne(
+    { email },
+    { $set: { role: "staff", updatedAt: new Date() } }
+  );
+
+  if (result.matchedCount === 0) {
+    throw new ApiError(500, "Account created but role could not be set");
+  }
+
+  const created = await User.findOne({ email })
+    .select("name phone email")
+    .lean<StaffRow>();
+
+  if (!created) {
+    throw new ApiError(500, "Account created but could not be loaded");
+  }
+
+  return {
+    id: String(created._id),
+    name: created.name,
+    phone: created.phone,
+    email: created.email,
+  };
 };
