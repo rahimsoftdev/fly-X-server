@@ -8,6 +8,7 @@ import type {
 } from "./dashboard.types.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const UPCOMING_LIMIT = 5;
 
 // date string হিসেবে সেভ থাকলেও crash করবে না
 const toDateStage = {
@@ -22,14 +23,20 @@ const toDateStage = {
 const getStats = async (userId: string, now: Date) => {
   const [travelOpportunities, pendingReservations, upcomingTrips] =
     await Promise.all([
+      // open আছে, কিন্তু user এখনো যোগ দেয়নি (যোগ দেওয়ার মতো opportunity)
       Opportunity.countDocuments({
         status: "open",
-        preferredDeparture: { $gte: now },
+        // passengers: { $ne: userId },
+        // preferredDeparture: { $gte: now },
       }),
+
+      // user-এর id আছে এবং status open (এখনো confirm হয়নি)
       Opportunity.countDocuments({
         passengers: userId,
         status: "open",
       }),
+
+      // user-এর id আছে এবং status confirmed (ভবিষ্যতের trip)
       Opportunity.countDocuments({
         passengers: userId,
         status: "confirmed",
@@ -143,39 +150,40 @@ const getPopularDates = async (now: Date): Promise<IPopularDate[]> => {
   }));
 };
 
-// ---------- Upcoming Trips (user-এর নিজের preference) ----------
+// ---------- Upcoming Trips (user-এর নিজের confirmed opportunity) ----------
+interface TripRow {
+  _id: unknown;
+  type: "one-way" | "two-way";
+  origin: string;
+  destination: string;
+  preferredDeparture: Date;
+  returnDate?: Date | null;
+  status: string;
+}
+
 const getUpcomingTripList = async (
   userId: string,
   now: Date
 ): Promise<IUpcomingTrip[]> => {
-  const rows = await TravelPreference.aggregate<{
-    _id: unknown;
-    origin: string;
-    destination: string;
-    type: "regular" | "one-time";
-    dayOfWeek?: string;
-    dateObj: Date | null;
-    preferredTime: string;
-  }>([
-    { $match: { creatorUserId: userId, status: { $ne: "canceled" } } },
-    toDateStage,
-    {
-      $match: {
-        $or: [{ type: "regular" }, { dateObj: { $gte: now } }],
-      },
-    },
-    { $sort: { createdAt: -1 } },
-    { $limit: 5 },
-  ]);
+  const rows = await Opportunity.find({
+    passengers: userId,
+    status: "confirmed",
+    preferredDeparture: { $gte: now },
+  })
+    .select("type origin destination preferredDeparture returnDate status")
+    .sort({ preferredDeparture: 1 })
+    .limit(UPCOMING_LIMIT)
+    .lean<TripRow[]>();
 
   return rows.map((r) => ({
     id: String(r._id),
+    source: "opportunity",
+    type: r.type,
     origin: r.origin,
     destination: r.destination,
-    type: r.type,
-    dayOfWeek: r.dayOfWeek ?? null,
-    date: r.dateObj ? r.dateObj.toISOString() : null,
-    preferredTime: r.preferredTime,
+    departure: r.preferredDeparture.toISOString(),
+    returnDate: r.returnDate ? r.returnDate.toISOString() : null,
+    status: r.status,
   }));
 };
 

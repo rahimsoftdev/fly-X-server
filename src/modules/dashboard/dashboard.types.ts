@@ -14,12 +14,13 @@ export interface IPopularDate {
 
 export interface IUpcomingTrip {
   id: string;
+  source: "opportunity" | "custom"; // কোন collection থেকে এসেছে
+  type: "one-way" | "two-way";
   origin: string;
   destination: string;
-  type: "regular" | "one-time";
-  dayOfWeek: string | null;
-  date: string | null;
-  preferredTime: string;
+  departure: string; // ISO date
+  returnDate: string | null; // শুধু two-way হলে থাকবে
+  status: string;
 }
 
 export interface IDashboardResponse {

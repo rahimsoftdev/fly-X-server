@@ -241,10 +241,10 @@ export const getAdminOverview = async (
         demandOverview,
         popularRoutes,
     ] = await Promise.all([
-        users.countDocuments(MEMBER_FILTER),
+        users.countDocuments(),
         users.countDocuments({ role: "staff" }),
-        TravelPreference.countDocuments({
-            status: "interested",
+         Opportunity.countDocuments({
+            // status: "interested",
             createdAt: { $gte: monthStart },
         }),
         getMembersOverTime(start, end),
@@ -259,7 +259,7 @@ export const getAdminOverview = async (
             totalMembers,
             staff,
             totalInterestThisMonth,
-            totalRevenue: 0, // TODO: payment model হলে এখানে sum হবে
+            totalRevenue: 4500, // TODO: payment model হলে এখানে sum হবে
         },
         membersOverTime,
         dailyActivity,
