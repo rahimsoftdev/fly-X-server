@@ -1,5 +1,8 @@
+// import { isValidObjectId, Types } from "mongoose";
 import User from "./user.model.js";
-import type { IUserListResponse } from "./user.types.js";
+import type { IStaffListResponse, IUpdatedUser, IUpdateUserInput, IUserListResponse } from "./user.types.js";
+import { isValidObjectId, model, Schema, Types } from "mongoose";
+// import type { IStaffListResponse } from "./user.types.js";
 
 interface UserRow {
   _id: unknown;
@@ -19,7 +22,7 @@ export const getAllUsers = async (
   const skip = (page - 1) * limit;
 
   const [rows, total] = await Promise.all([
-    User.find()
+    User.find({role:'user'})
       .select("name email phone address city state zipCode")
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -55,4 +58,187 @@ export const getAllUsers = async (
 
 export const getTotalUserCount = async (): Promise<number> => {
   return User.countDocuments();
+};
+
+
+
+/* ---------- Update (admin) ---------- */
+export class ApiError extends Error {
+  statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+interface EditableUserRow {
+  _id: unknown;
+  name: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  zipCode: string;
+}
+
+const EDIT_SELECT =
+  "name firstName lastName email phone address city state zipCode";
+
+const toUpdatedUser = (r: EditableUserRow): IUpdatedUser => ({
+  id: String(r._id),
+  name: r.name,
+  firstName: r.firstName,
+  lastName: r.lastName,
+  phone: r.phone,
+  email: r.email,
+  address: r.address,
+  city: r.city,
+  state: r.state,
+  zipCode: r.zipCode,
+  fullAddress: `${r.address}, ${r.city}, ${r.state} ${r.zipCode}`,
+});
+
+export const updateUserById = async (
+  id: string,
+  input: IUpdateUserInput
+): Promise<IUpdatedUser> => {
+  if (!isValidObjectId(id)) {
+    throw new ApiError(400, "Invalid user id");
+  }
+
+  const existing = await User.findById(id)
+    .select(EDIT_SELECT)
+    .lean<EditableUserRow>();
+
+  if (!existing) {
+    throw new ApiError(404, "User not found");
+  }
+
+  // email বদলালে অন্য কারো email-এর সাথে যেন না মেলে
+  if (input.email && input.email !== existing.email) {
+    const taken = await User.exists({
+      email: input.email,
+      _id: { $ne: id },
+    });
+    if (taken) {
+      throw new ApiError(409, "This email is already in use");
+    }
+  }
+
+  const firstName = input.firstName ?? existing.firstName;
+  const lastName = input.lastName ?? existing.lastName;
+
+  // শুধু পাঠানো ফিল্ডই বদলাবে (role কখনোই না)
+  const update: Record<string, unknown> = {
+    ...input,
+    name: `${firstName} ${lastName}`.trim(),
+    updatedAt: new Date(),
+  };
+
+  const updated = await User.findByIdAndUpdate(
+    id,
+    { $set: update },
+    { new: true, runValidators: true }
+  )
+    .select(EDIT_SELECT)
+    .lean<EditableUserRow>();
+
+  if (!updated) {
+    throw new ApiError(404, "User not found");
+  }
+
+  return toUpdatedUser(updated);
+};
+
+
+
+
+
+
+
+
+
+
+/* ---------- Staff ---------- */
+interface StaffRow {
+  _id: unknown;
+  name: string;
+  phone: string;
+  email: string;
+}
+
+// Better Auth-এর session/account collection, শুধু ডিলিটের জন্য
+const AuthSession = model(
+  "AuthSession",
+  new Schema({}, { strict: false, collection: "session" })
+);
+const AuthAccount = model(
+  "AuthAccount",
+  new Schema({}, { strict: false, collection: "account" })
+);
+
+export const getAllStaff = async (
+  page: number,
+  limit: number
+): Promise<IStaffListResponse> => {
+  const filter = { role: "staff" };
+  const skip = (page - 1) * limit;
+
+  const [rows, total] = await Promise.all([
+    User.find(filter)
+      .select("name phone email")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean<StaffRow[]>(),
+    User.countDocuments(filter),
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  return {
+    items: rows.map((r) => ({
+      id: String(r._id),
+      name: r.name,
+      phone: r.phone,
+      email: r.email,
+    })),
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasPrevPage: page > 1,
+      hasNextPage: page < totalPages,
+    },
+  };
+};
+
+export const deleteStaffById = async (id: string): Promise<void> => {
+  if (!isValidObjectId(id)) {
+    throw new ApiError(400, "Invalid staff id");
+  }
+
+  // শুধু staff ডিলিট করা যাবে, admin বা সাধারণ user না
+  const staff = await User.findOne({ _id: id, role: "staff" })
+    .select("_id")
+    .lean();
+
+  if (!staff) {
+    throw new ApiError(404, "Staff not found");
+  }
+
+  // userId string বা ObjectId, যেভাবেই সেভ থাকুক ধরা পড়বে
+  const ids = [id, new Types.ObjectId(id)];
+
+  // আগে login/session মুছি, শেষে user
+  await Promise.all([
+    AuthSession.deleteMany({ userId: { $in: ids } }),
+    AuthAccount.deleteMany({ userId: { $in: ids } }),
+  ]);
+  await User.deleteOne({ _id: id });
 };

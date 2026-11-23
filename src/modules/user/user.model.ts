@@ -4,6 +4,8 @@ import type { IUser } from "./user.types.js";
 const userSchema = new Schema<IUser>(
   {
     name: String,
+    firstName: String,
+    lastName: String,
     email: String,
     phone: String,
     address: String,
@@ -12,6 +14,7 @@ const userSchema = new Schema<IUser>(
     zipCode: String,
     role: String,
     createdAt: Date,
+    updatedAt: Date,
   },
   {
     // Better Auth নিজেই এই collection বানায়, mongoose যেন নতুন না বানায়
