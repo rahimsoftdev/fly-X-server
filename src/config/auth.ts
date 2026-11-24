@@ -21,12 +21,18 @@ export const auth = betterAuth({
         },
     },
 
+
     emailAndPassword: {
         enabled: true,
         minPasswordLength: 6,
     },
 
     user: {
+        changeEmail: {
+            enabled: true,
+            updateEmailWithoutVerification: true,
+        },
+
         additionalFields: {
             firstName: {
                 type: "string",
